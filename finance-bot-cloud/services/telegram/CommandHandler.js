@@ -5,13 +5,13 @@ import { ErrorLogger } from '../monitoring/ErrorLogger.js';
 import { validateUser } from '../../utils/validators.js';
 import { SuperAdminService } from '../google-sheets/SuperAdminService.js';
 import { GroupDataService } from '../google-sheets/GroupDataService.js';
-import { formatCurrency } from '../../utils/formatters.js';
+import { formatCurrency, formatDate } from '../../utils/formatters.js';
 
 export class CommandHandler {
   constructor(config) {
     this.config = config;
-    this.groupDataService = config.groupDataService || new GroupDataService(config.sheetsService);
-    this.superAdminService = config.superAdminService || new SuperAdminService(config.sheetsService);
+    this.groupDataService = config.groupDataService;
+    this.superAdminService = config.superAdminService;
     this.auditService = new AuditService();
     this.logger = new ErrorLogger();
   }
@@ -23,7 +23,7 @@ export class CommandHandler {
     const userId = from.id;
 
     try {
-      const userRole = await this.getUserRole(chatId, userId);
+      const userRole = await this.getUserRole(message, userId);
 
       const isSuperAdminCommand = COMMANDS.SUPER_ADMIN.includes(command);
       const isAdminCommand = COMMANDS.ADMIN.includes(command);
@@ -55,10 +55,15 @@ export class CommandHandler {
     }
   }
 
-  async getUserRole(chatId, userId) {
+  async getUserRole(message, userId) {
+    const chatId = message.chat.id;
     if (ENV.SUPER_ADMIN_IDS.includes(userId)) {
       return USER_ROLES.SUPER_ADMIN;
     }
+    if (message.chat.type === 'private') {
+        return USER_ROLES.USER;
+    }
+
     const user = await this.groupDataService.getUser(chatId, userId);
     if (validateUser(user) && user.isAdmin) {
       return USER_ROLES.ADMIN;
@@ -102,10 +107,70 @@ export class CommandHandler {
   }
 
   async handleSuperAdminCommand(command, args, message, bot) {
-    // ... (Super Admin command logic remains the same)
+    const chatId = message.chat.id;
+    switch(command) {
+        case 'super_broadcast': {
+            const messageText = args.join(' ');
+            if (!messageText) {
+                return bot.sendMessage(chatId, '✍️ Mohon berikan pesan untuk broadcast.\nContoh: /super_broadcast Halo semua!');
+            }
+            const allGroups = await this.superAdminService.getAllGroups({ status: 'ACTIVE' });
+            let successCount = 0;
+            for (const group of allGroups) {
+              try {
+                await bot.sendMessage(group.chatId, `📣 **Pesan dari Admin:**\n\n${messageText}`, { parse_mode: 'Markdown' });
+                successCount++;
+              } catch (error) {
+                this.logger.warn(`Failed to broadcast to group ${group.chatId}:`, { errorMessage: error.message });
+              }
+            }
+            return bot.sendMessage(chatId, `✅ Pesan berhasil dikirim ke ${successCount} dari ${allGroups.length} grup aktif.`);
+        }
+        case 'super_stats': {
+            const stats = await this.superAdminService.getSystemStatistics();
+            if (!stats) {
+                return bot.sendMessage(chatId, '❌ Gagal mengambil statistik sistem.');
+            }
+            const statsText = `
+📊 **Statistik Sistem** 📊
+- **Total Grup:** ${stats.totalGroups}
+- **Grup Aktif:** ${stats.activeGroups}
+- **Total Pengguna:** ${stats.totalUsers}
+- **Total Transaksi:** ${stats.totalTransactions}
+- **Total Error Tercatat:** ${stats.totalErrors}
+- **Error Belum Terselesaikan:** ${stats.unresolvedErrors}
+- **Audit Terakhir:** ${formatDate(stats.lastAudit)}
+            `;
+            return bot.sendMessage(chatId, statsText, { parse_mode: 'Markdown' });
+        }
+    }
   }
 
   async handleUserCommand(command, args, message, bot) {
-    // ... (User command logic remains the same)
+    const chatId = message.chat.id;
+    switch(command) {
+        case 'start':
+            return bot.sendMessage(chatId, 'Selamat datang di AI Finance Bot! Kirim pesan dalam bahasa natural untuk mencatat transaksi, atau gunakan /help untuk melihat daftar perintah.');
+        case 'help':
+            const helpText = `
+🤖 **Bantuan AI Finance Bot** 🤖
+
+Anda bisa berinteraksi dengan saya menggunakan bahasa natural, contoh:
+- "Pengeluaran 50rb untuk makan siang"
+- "Pemasukan 2 juta dari proyek freelance"
+- "Sisa saldo berapa?"
+
+Atau gunakan perintah berikut:
+/start - Memulai bot
+/help - Menampilkan pesan ini
+
+Jika Anda adalah **Admin**, Anda juga bisa menggunakan:
+/config - Melihat konfigurasi grup
+/setlimit <daily|monthly> <jumlah> - Mengatur batas transaksi
+            `;
+            return bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+        default:
+            return bot.sendMessage(chatId, `⚠️ Perintah tidak dikenal: /${command}. Gunakan /help untuk melihat daftar perintah.`);
+    }
   }
 }
