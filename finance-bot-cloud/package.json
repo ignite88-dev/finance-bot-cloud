@@ -1,0 +1,66 @@
+{
+  "name": "finance-bot-cloud",
+  "version": "2.0.0",
+  "description": "Cloud-native AI Finance Telegram Bot with Google Sheets",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "setup-super-admin": "node scripts/setup-super-admin.js",
+    "provision-sheet": "node scripts/provision-sheet.js",
+    "health-check": "node scripts/health-check.js",
+    "backup": "node scripts/backup-restore.js --backup",
+    "restore": "node scripts/backup-restore.js --restore",
+    "docker:build": "docker build -t finance-bot .",
+    "docker:run": "docker-compose up -d",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "googleapis": "^128.0.0",
+    "@google-cloud/speech": "^6.2.0",
+    "openai": "^4.0.0",
+    "axios": "^1.6.0",
+    "moment-timezone": "^0.5.43",
+    "dotenv": "^16.3.0",
+    "redis": "^4.6.0",
+    "ioredis": "^5.3.0",
+    "winston": "^3.11.0",
+    "uuid": "^9.0.1",
+    "joi": "^17.11.0",
+    "express": "^4.18.0",
+    "helmet": "^7.0.0",
+    "cors": "^2.8.5",
+    "compression": "^1.7.4",
+    "rate-limiter-flexible": "^4.0.1",
+    "pino": "^8.16.0",
+    "pino-pretty": "^10.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.0",
+    "@types/node": "^20.10.0",
+    "dotenv-cli": "^7.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "telegram-bot",
+    "finance",
+    "ai",
+    "google-sheets",
+    "cloud",
+    "multi-tenant"
+  ],
+  "author": "Finance Bot Team",
+  "license": "MIT"
+}
