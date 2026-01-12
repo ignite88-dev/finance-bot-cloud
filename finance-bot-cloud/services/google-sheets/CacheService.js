@@ -1,231 +1,108 @@
-import OpenAI from 'openai';
-import axios from 'axios';
-import { MemoryManager } from './MemoryManager.js';
-import { PromptBuilder } from './PromptBuilder.js';
-import { IntentParser } from './IntentParser.js';
+import Redis from 'ioredis';
+import { ENV } from '../../config/environment.js';
 import { ErrorLogger } from '../monitoring/ErrorLogger.js';
 
-export class AIOrchestrationService {
-  constructor(config) {
-    this.config = config;
-    this.openai = new OpenAI({ apiKey: config.openaiApiKey });
+let instance = null;
+
+export class CacheService {
+  constructor() {
+    if (instance) {
+      return instance;
+    }
+
     this.logger = new ErrorLogger();
-    this.promptBuilder = new PromptBuilder();
-    this.intentParser = new IntentParser();
-    this.memoryManager = null;
-  }
-  
-  setMemoryManager(memoryManager) {
-    this.memoryManager = memoryManager;
-  }
-  
-  async processMessage(message, context) {
-    const startTime = Date.now();
-    
     try {
-      // 1. Get or create conversation memory
-      const memory = await this.memoryManager.getConversationMemory(
-        context.chatId,
-        context.userId,
-        context.threadId
-      );
-      
-      // 2. Build AI prompt with context
-      const prompt = await this.promptBuilder.build(message, {
-        ...context,
-        memory,
-        timestamp: new Date().toISOString()
+      this.redis = new Redis(ENV.REDIS_URL, {
+        password: ENV.REDIS_PASSWORD,
+        maxRetriesPerRequest: 3,
+        enableReadyCheck: true,
+        lazyConnect: true,
       });
-      
-      // 3. Call AI API
-      const aiResponse = await this.callAI(prompt);
-      
-      // 4. Parse intent and entities
-      const parsed = this.intentParser.parse(aiResponse);
-      
-      // 5. Update memory
-      await this.memoryManager.addToMemory({
-        chatId: context.chatId,
-        userId: context.userId,
-        threadId: context.threadId,
-        message,
-        aiResponse: parsed,
-        timestamp: new Date().toISOString()
-      });
-      
-      // 6. Log performance
-      const processingTime = Date.now() - startTime;
-      this.logPerformance({
-        ...context,
-        messageLength: message.length,
-        processingTime,
-        tokensUsed: aiResponse.usage?.total_tokens || 0
-      });
-      
-      return {
-        success: true,
-        data: parsed,
-        metadata: {
-          processingTime,
-          tokensUsed: aiResponse.usage?.total_tokens || 0,
-          model: aiResponse.model
-        }
-      };
-      
+
+      this.redis.on('connect', () => this.logger.info('Redis connected'));
+      this.redis.on('ready', () => this.logger.info('Redis ready'));
+      this.redis.on('error', (err) => this.logger.error('Redis error:', err));
+
+      instance = this;
     } catch (error) {
-      this.logger.error('AI processing failed:', error);
-      
-      return {
-        success: false,
-        error: error.message,
-        fallback: this.getFallbackResponse(message, context)
-      };
+      this.logger.error('Failed to initialize Redis:', error);
+      this.redis = null;
     }
   }
-  
-  async callAI(prompt) {
-    // Try primary provider (OpenAI)
+
+  async get(key) {
+    if (!this.redis) return null;
     try {
-      const response = await this.openai.chat.completions.create({
-        model: this.config.model,
-        messages: [
-          {
-            role: 'system',
-            content: prompt.system
-          },
-          {
-            role: 'user',
-            content: prompt.user
-          }
-        ],
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-        response_format: { type: "json_object" }
-      });
-      
-      return response;
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : null;
     } catch (error) {
-      this.logger.warn('OpenAI failed, trying DeepSeek:', error.message);
-      
-      // Fallback to DeepSeek
-      try {
-        const response = await axios.post(
-          'https://api.deepseek.com/chat/completions',
-          {
-            model: 'deepseek-chat',
-            messages: [
-              {
-                role: 'system',
-                content: prompt.system
-              },
-              {
-                role: 'user',
-                content: prompt.user
-              }
-            ],
-            temperature: this.config.temperature,
-            max_tokens: this.config.maxTokens,
-            response_format: { type: "json_object" }
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${this.config.deepseekApiKey}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 30000
-          }
-        );
-        
-        return response.data;
-      } catch (deepseekError) {
-        throw new Error(`All AI providers failed: ${deepseekError.message}`);
+      this.logger.error(`Failed to get from cache (key: ${key}):`, error);
+      return null;
+    }
+  }
+
+  async set(key, value, ttl) {
+    if (!this.redis) return false;
+    try {
+      const stringValue = JSON.stringify(value);
+      if (ttl) {
+        await this.redis.set(key, stringValue, 'EX', ttl);
+      } else {
+        await this.redis.set(key, stringValue);
       }
-    }
-  }
-  
-  async processVoice(voiceData, context) {
-    try {
-      // 1. Convert voice to text
-      const text = await this.transcribeVoice(voiceData);
-      
-      // 2. Process as text message
-      return await this.processMessage(text, {
-        ...context,
-        isVoice: true,
-        originalVoice: voiceData
-      });
-      
+      return true;
     } catch (error) {
-      this.logger.error('Voice processing failed:', error);
-      return {
-        success: false,
-        error: error.message,
-        fallback: "Maaf, saya tidak bisa memproses pesan suara saat ini."
-      };
+      this.logger.error(`Failed to set to cache (key: ${key}):`, error);
+      return false;
     }
   }
-  
-  async transcribeVoice(voiceData) {
-    // Implementation depends on voice service (Google Speech, Whisper, etc.)
-    // This is a placeholder - implement based on your chosen service
-    
-    // Example with Google Speech-to-Text
-    if (voiceData.googleSpeechApiKey) {
-      // Implement Google Speech API call
-    }
-    
-    // Fallback to Whisper (OpenAI)
+
+  async del(key) {
+    if (!this.redis) return false;
     try {
-      const response = await this.openai.audio.transcriptions.create({
-        file: voiceData.file,
-        model: "whisper-1",
-        language: "id"
-      });
-      
-      return response.text;
+      await this.redis.del(key);
+      return true;
     } catch (error) {
-      throw new Error(`Voice transcription failed: ${error.message}`);
+      this.logger.error(`Failed to delete from cache (key: ${key}):`, error);
+      return false;
     }
   }
-  
-  getFallbackResponse(message, context) {
-    // Simple rule-based fallback
-    const lowerMessage = message.toLowerCase();
-    
-    if (lowerMessage.includes('saldo') || lowerMessage.includes('balance')) {
-      return {
-        type: "info",
-        action: "balance",
-        message: "Untuk melihat saldo, gunakan tombol '💰 Saldo' atau ketik 'cek saldo'"
-      };
+
+  async mget(keys) {
+    if (!this.redis) return null;
+    try {
+      const data = await this.redis.mget(keys);
+      return data.map(item => item ? JSON.parse(item) : null);
+    } catch (error) {
+      this.logger.error(`Failed to mget from cache (keys: ${keys.join(',')}):`, error);
+      return null;
     }
-    
-    if (lowerMessage.includes('transaksi') || lowerMessage.includes('history')) {
-      return {
-        type: "info",
-        action: "history",
-        message: "Untuk melihat transaksi, gunakan tombol '📊 Harian' atau '📅 Bulanan'"
-      };
-    }
-    
-    if (lowerMessage.includes('bantuan') || lowerMessage.includes('help')) {
-      return {
-        type: "info",
-        action: "help",
-        message: "Gunakan tombol di keyboard atau ketik perintah seperti:\n• 'gajian 5 juta'\n• 'makan 75rb'\n• 'rate 16000'\n• 'salah tadi' untuk membatalkan"
-      };
-    }
-    
-    return {
-      type: "chat",
-      action: "chat_response",
-      message: "Maaf, saya tidak mengerti. Coba gunakan tombol di bawah atau ketik 'bantuan' untuk panduan.",
-      chat_response: "Saya agak bingung nih. Coba gunakan tombol yang tersedia atau ketik 'bantuan' ya!"
-    };
   }
-  
-  logPerformance(metrics) {
-    // Log to monitoring service
-    this.logger.info('AI Performance:', metrics);
+
+  async mset(pairs, ttl) {
+    if (!this.redis) return false;
+    try {
+      const pipeline = this.redis.pipeline();
+      for (const [key, value] of pairs) {
+        const stringValue = JSON.stringify(value);
+        if (ttl) {
+          pipeline.set(key, stringValue, 'EX', ttl);
+        } else {
+          pipeline.set(key, stringValue);
+        }
+      }
+      await pipeline.exec();
+      return true;
+    } catch (error) {
+      this.logger.error('Failed to mset to cache:', error);
+      return false;
+    }
+  }
+
+  async cleanup() {
+    if (this.redis) {
+      await this.redis.quit();
+      this.logger.info('Redis connection closed.');
+    }
   }
 }
