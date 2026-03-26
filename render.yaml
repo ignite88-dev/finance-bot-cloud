@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: finance-bot
+    runtime: python
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: cd bot && python main.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: NLP_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TIMEZONE
+        value: Asia/Jakarta
+      - key: DEFAULT_CURRENCY
+        value: IDR
