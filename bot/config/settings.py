@@ -10,7 +10,11 @@ class Settings(BaseSettings):
     supabase_key: str
 
     # NLP Provider
-    nlp_provider: str = "openai"  # "openai" or "gemini"
+    nlp_provider: str = "deepseek"  # "deepseek", "openai", or "gemini"
+
+    # DeepSeek (default)
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
 
     # OpenAI
     openai_api_key: str = ""
