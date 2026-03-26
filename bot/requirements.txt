@@ -1,0 +1,8 @@
+python-telegram-bot[ext]~=21.10
+supabase~=2.11
+openai~=1.60
+google-genai~=1.5
+pydantic~=2.10
+pydantic-settings~=2.7
+python-dotenv~=1.0
+pytz~=2024.2
