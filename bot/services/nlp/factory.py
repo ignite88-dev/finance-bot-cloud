@@ -1,9 +1,11 @@
 from config.settings import settings
 from services.nlp.base import NLPProvider
+from services.nlp.deepseek_provider import DeepSeekNLPProvider
 from services.nlp.openai_provider import OpenAINLPProvider
 from services.nlp.gemini_provider import GeminiNLPProvider
 
 _PROVIDERS: dict[str, type[NLPProvider]] = {
+    "deepseek": DeepSeekNLPProvider,
     "openai": OpenAINLPProvider,
     "gemini": GeminiNLPProvider,
     # Future: "local": LocalModelProvider
